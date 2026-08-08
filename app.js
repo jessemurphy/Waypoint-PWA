@@ -244,17 +244,25 @@ async function syncCheckin(c) {
     const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/checkin", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": token },
-      body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts }),
+      body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts,
+                             client_id: c.id }),
     });
     if (res.ok) { c.synced = true; save(); }
   } catch (e) { /* offline or unreachable — stays queued */ }
   renderSyncStatus();
 }
 
-function flushPendingSync() {
+async function flushPendingSync() {
   const { url, token } = loadSync();
   if (!url || !token) return;
-  for (const c of state.checkins) syncCheckin(c);
+  // Sequential, not Promise.all — a queue of several unsynced stamps firing
+  // at once landed two of the same new place on the server at the same
+  // instant and raced into two duplicate spots there. One at a time means
+  // each request either sees the previous one already committed, or is the
+  // first (now also guarded server-side, but no reason to lean on that).
+  for (const c of state.checkins) {
+    if (!c.synced) await syncCheckin(c);
+  }
 }
 
 function renderSyncStatus() {
