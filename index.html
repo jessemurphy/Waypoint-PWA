@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#101B17">
+<meta name="description" content="A personal check-in log. Stamp where you go — your history stays on your device.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Waypoint">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.json">
+<title>Waypoint — Check In Anywhere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">
+      <svg class="brand-pin" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L19 9.5L12 14L5 9.5L12 2Z" fill="currentColor"/>
+        <path d="M12 14V22" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <h1>Waypoint</h1>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="menu-btn" title="Your data">⋯</button>
+    </div>
+  </div>
+
+  <div class="stamp-zone">
+    <button class="stamp-btn" id="checkin-btn">CHECK<br>IN</button>
+    <div class="stamp-hint" id="stamp-hint">Tap to stamp your current location</div>
+  </div>
+
+  <div class="stats" id="stats-strip"></div>
+
+  <div id="history"></div>
+
+  <div class="empty hidden" id="empty-state">
+    <h3>No stamps yet</h3>
+    <p>Hit the big button wherever you are — coffee shop, trailhead, your own driveway — and start the log.</p>
+  </div>
+
+  <div id="mayors-section" class="hidden">
+    <div class="section-title">Your regulars</div>
+    <div id="mayors-list"></div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Place picker sheet -->
+<div class="sheet-overlay hidden" id="picker-overlay">
+  <div class="sheet">
+    <h2>Where are you?</h2>
+    <div class="sheet-sub" id="picker-coords">—</div>
+    <div id="place-options"></div>
+    <div class="custom-place">
+      <input type="text" id="custom-name" placeholder="Or name this place yourself">
+      <button id="custom-add">Stamp</button>
+    </div>
+    <p class="sheet-note">Nearby places come from OpenStreetMap. No network? Name it yourself — the coordinates are already saved.</p>
+    <button class="sheet-cancel" id="picker-cancel">Cancel</button>
+  </div>
+</div>
+
+<!-- Edit check-in sheet -->
+<div class="sheet-overlay hidden" id="edit-overlay">
+  <div class="sheet">
+    <h2>Edit stamp</h2>
+    <div class="field">
+      <label>Place name</label>
+      <input type="text" id="edit-name">
+    </div>
+    <div class="field">
+      <label>Date &amp; time</label>
+      <input type="datetime-local" id="edit-time">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-secondary btn-danger" id="edit-delete">Delete</button>
+      <button class="btn-primary" id="edit-save">Save</button>
+    </div>
+    <button class="sheet-cancel" id="edit-cancel">Cancel</button>
+  </div>
+</div>
+
+<!-- Data sheet -->
+<div class="sheet-overlay hidden" id="menu-overlay">
+  <div class="sheet">
+    <h2>Your data</h2>
+    <p class="sheet-note" style="margin-top:0;">
+      Every stamp lives only in this browser. Export a backup before clearing site data or switching devices. The JSON format is simple — timestamp, name, coordinates — so it'll merge nicely into a bigger location archive.
+    </p>
+    <div class="sheet-actions">
+      <button class="btn-secondary" id="export-btn" style="flex:1;">⇩ Export JSON</button>
+      <button class="btn-secondary" id="import-btn" style="flex:1;">⇧ Import JSON</button>
+    </div>
+    <input type="file" id="import-file" accept="application/json" class="hidden">
+    <button class="sheet-cancel" id="menu-close">Close</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

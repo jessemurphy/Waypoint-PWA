@@ -1,0 +1,15 @@
+{
+  "name": "Waypoint — Check In Anywhere",
+  "short_name": "Waypoint",
+  "description": "A personal check-in log. Stamp where you go — your history stays on your device.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101B17",
+  "theme_color": "#101B17",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
