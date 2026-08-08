@@ -96,6 +96,48 @@ out center 25;`;
   return places.slice(0, 12);
 }
 
+/* ---------- personal places (reusable custom entries) ---------- */
+// Only names typed by hand (no osmId) — OpenStreetMap already resurfaces its
+// own places by proximity each time, badge and all. This is specifically for
+// "Murphy home" and friends: places Overpass will never know about, so they
+// need their own memory or every visit means retyping the name from scratch
+// (and any spelling drift splits one place into several in the history/mayors).
+function personalPlaces() {
+  const byKey = new Map();
+  for (const c of state.checkins) {
+    if (c.osmId) continue;
+    const key = c.name.toLowerCase();
+    const p = byKey.get(key) || { name: c.name, category: c.category, count: 0, lastTs: c.ts };
+    p.count++;
+    if (c.ts > p.lastTs) { p.name = c.name; p.category = c.category; p.lastTs = c.ts; }
+    byKey.set(key, p);
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.count - a.count);
+}
+
+function renderPersonalOptions(loc, filterText) {
+  const el = document.getElementById("personal-options");
+  const q = (filterText || "").trim().toLowerCase();
+  const places = personalPlaces().filter((p) => !q || p.name.toLowerCase().includes(q));
+  if (places.length === 0) { el.innerHTML = ""; return; }
+  const header = q ? "" : `<div class="section-title" style="margin:0 0 8px;">Your places</div>`;
+  el.innerHTML = header;
+  for (const p of places) {
+    const btn = document.createElement("button");
+    btn.className = "place-option";
+    btn.innerHTML = `
+      <div class="place-opt-main">
+        <div class="place-opt-name">${escapeHtml(p.name)}<span class="visit-badge">×${p.count}</span></div>
+        ${p.category ? `<div class="place-opt-detail">${escapeHtml(p.category)}</div>` : ""}
+      </div>
+      <div class="place-opt-dist">★</div>`;
+    btn.addEventListener("click", () => {
+      commitCheckin({ name: p.name, category: p.category, lat: loc.lat, lon: loc.lon });
+    });
+    el.appendChild(btn);
+  }
+}
+
 /* ---------- check-in flow ---------- */
 async function startCheckin() {
   const btn = document.getElementById("checkin-btn");
@@ -126,6 +168,7 @@ function openPicker(loc) {
   optionsEl.innerHTML = `<div class="sheet-sub">Looking up nearby places…</div>`;
   document.getElementById("custom-name").value = "";
   document.getElementById("picker-overlay").classList.remove("hidden");
+  renderPersonalOptions(loc, "");
 
   fetchNearbyPlaces(loc.lat, loc.lon)
     .then((places) => renderPlaceOptions(places, loc))
@@ -426,6 +469,9 @@ function init() {
   });
   document.getElementById("custom-name").addEventListener("keydown", (e) => {
     if (e.key === "Enter") document.getElementById("custom-add").click();
+  });
+  document.getElementById("custom-name").addEventListener("input", (e) => {
+    if (pendingLocation) renderPersonalOptions(pendingLocation, e.target.value);
   });
 
   document.getElementById("edit-cancel").addEventListener("click", closeEdit);
