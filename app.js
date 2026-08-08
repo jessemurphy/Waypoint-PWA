@@ -204,18 +204,68 @@ function renderPlaceOptions(places, loc) {
 }
 
 function commitCheckin({ name, category, lat, lon, osmId }) {
-  state.checkins.push({
+  const c = {
     id: uid(),
     name,
     category: category || "",
     lat, lon,
     osmId: osmId || null,
     ts: new Date().toISOString(),
-  });
+  };
+  state.checkins.push(c);
   save();
   closePicker();
   render();
   toast(`Stamped: ${name}`);
+  syncCheckin(c);   // best-effort, silent on failure — stays queued for the next flush
+}
+
+/* ---------- family trips sync (optional, self-hosted) ---------- */
+// Waypoint has no backend of its own, so this is the one place credentials
+// exist: entered by hand into this device's own localStorage, never in the
+// published source. commitCheckin() fires this on every stamp (auto-sync);
+// failures (offline, wrong network, intranet down) are silent and the
+// check-in just stays local — it's already saved either way — and gets
+// retried the next time the app opens or a sync setting is saved.
+const SYNC_KEY = "waypoint:sync:v1";
+
+function loadSync() {
+  try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveSyncSettings(url, token) {
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ url: url.trim(), token: token.trim() }));
+}
+
+async function syncCheckin(c) {
+  const { url, token } = loadSync();
+  if (!url || !token || c.synced) return;
+  try {
+    const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/checkin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Api-Key": token },
+      body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts }),
+    });
+    if (res.ok) { c.synced = true; save(); }
+  } catch (e) { /* offline or unreachable — stays queued */ }
+  renderSyncStatus();
+}
+
+function flushPendingSync() {
+  const { url, token } = loadSync();
+  if (!url || !token) return;
+  for (const c of state.checkins) syncCheckin(c);
+}
+
+function renderSyncStatus() {
+  const el = document.getElementById("sync-status");
+  if (!el) return;
+  const { url, token } = loadSync();
+  if (!url || !token) { el.textContent = "Not connected"; return; }
+  const pending = state.checkins.filter((c) => !c.synced).length;
+  el.textContent = pending === 0
+    ? `Connected — all ${state.checkins.length} synced`
+    : `Connected — ${pending} pending`;
 }
 
 function closePicker() {
@@ -478,8 +528,13 @@ function init() {
   document.getElementById("edit-save").addEventListener("click", saveEdit);
   document.getElementById("edit-delete").addEventListener("click", deleteEdit);
 
-  document.getElementById("menu-btn").addEventListener("click", () =>
-    document.getElementById("menu-overlay").classList.remove("hidden"));
+  document.getElementById("menu-btn").addEventListener("click", () => {
+    const { url, token } = loadSync();
+    document.getElementById("sync-url").value = url || "";
+    document.getElementById("sync-token").value = token || "";
+    renderSyncStatus();
+    document.getElementById("menu-overlay").classList.remove("hidden");
+  });
   document.getElementById("menu-close").addEventListener("click", () =>
     document.getElementById("menu-overlay").classList.add("hidden"));
   document.getElementById("export-btn").addEventListener("click", exportData);
@@ -489,12 +544,20 @@ function init() {
     if (e.target.files[0]) importData(e.target.files[0]);
     e.target.value = "";
   });
+  document.getElementById("sync-save").addEventListener("click", () => {
+    saveSyncSettings(document.getElementById("sync-url").value,
+                     document.getElementById("sync-token").value);
+    renderSyncStatus();
+    toast("Sync settings saved");
+    flushPendingSync();
+  });
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch((err) => console.warn("SW failed", err));
   }
 
   render();
+  flushPendingSync();
 }
 
 document.addEventListener("DOMContentLoaded", init);

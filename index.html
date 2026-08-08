@@ -104,6 +104,18 @@
       <button class="btn-secondary" id="import-btn" style="flex:1;">⇧ Import JSON</button>
     </div>
     <input type="file" id="import-file" accept="application/json" class="hidden">
+
+    <div class="field" style="margin-top:18px;">
+      <label>Family Trips URL</label>
+      <input type="text" id="sync-url" placeholder="http://100.x.x.x:5055" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Sync token</label>
+      <input type="password" id="sync-token" placeholder="Shared token" autocomplete="off">
+    </div>
+    <p class="sheet-note" id="sync-status" style="margin-top:0;">Not connected</p>
+    <button class="btn-secondary" id="sync-save" style="width:100%;">Save sync settings</button>
+
     <button class="sheet-cancel" id="menu-close">Close</button>
   </div>
 </div>
