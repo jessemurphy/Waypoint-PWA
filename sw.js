@@ -1,4 +1,4 @@
-const CACHE = "waypoint-v1";
+const CACHE = "waypoint-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -29,16 +29,16 @@ self.addEventListener("fetch", (e) => {
   // Never cache the live place-lookup APIs — always go to the network for those.
   if (url.hostname.includes("overpass") || url.hostname.includes("nominatim")) return;
 
+  // Network-first: a new deploy must show up on the very next load instead
+  // of being invisibly stuck behind whatever this device cached first.
+  // Offline (or a flaky connection) still falls back to the cache.
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(e.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(e.request, copy));
-          return res;
-        })
-        .catch(() => cached);
-    })
+    fetch(e.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((cache) => cache.put(e.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
