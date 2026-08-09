@@ -612,6 +612,22 @@ function importData(file) {
   reader.readAsText(file);
 }
 
+function clearAllCheckins() {
+  // Local-only: check-ins already synced live on as independent rows in
+  // the family intranet's own database, no ongoing link back to this
+  // device -- there's no delete call here, just wiping this device's own
+  // copy. Sync settings (waypoint:sync:v1) are a separate localStorage key
+  // and are untouched.
+  if (!confirm(`Delete all ${state.checkins.length} check-ins from this device? `
+              + "Anything already synced to Family Trips is unaffected. This cannot be undone here.")) {
+    return;
+  }
+  state.checkins = [];
+  save();
+  render();
+  toast("Cleared");
+}
+
 /* ---------- toast ---------- */
 function toast(msg) {
   const t = document.getElementById("toast");
@@ -656,6 +672,7 @@ function init() {
   document.getElementById("export-btn").addEventListener("click", exportData);
   document.getElementById("import-btn").addEventListener("click", () =>
     document.getElementById("import-file").click());
+  document.getElementById("clear-btn").addEventListener("click", clearAllCheckins);
   document.getElementById("import-file").addEventListener("change", (e) => {
     if (e.target.files[0]) importData(e.target.files[0]);
     e.target.value = "";
