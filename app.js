@@ -107,33 +107,61 @@ function personalPlaces() {
   for (const c of state.checkins) {
     if (c.osmId) continue;
     const key = c.name.toLowerCase();
-    const p = byKey.get(key) || { name: c.name, category: c.category, count: 0, lastTs: c.ts };
+    const p = byKey.get(key) || { name: c.name, category: c.category, count: 0, lastTs: c.ts,
+                                  lat: c.lat, lon: c.lon };
     p.count++;
-    if (c.ts > p.lastTs) { p.name = c.name; p.category = c.category; p.lastTs = c.ts; }
+    if (c.ts > p.lastTs) {
+      p.name = c.name; p.category = c.category; p.lastTs = c.ts; p.lat = c.lat; p.lon = c.lon;
+    }
     byKey.set(key, p);
   }
   return Array.from(byKey.values()).sort((a, b) => b.count - a.count);
 }
 
+// Today, in this device's own local time -- matches dayKey()'s own
+// getFullYear/getMonth/getDate use, so "today" here always means the same
+// calendar day dayKey() would compute for a fresh check-in right now.
+function checkedInTodayLocally(name) {
+  const today = dayKey(new Date().toISOString());
+  const key = name.toLowerCase();
+  return state.checkins.some((c) => c.name.toLowerCase() === key && dayKey(c.ts) === today);
+}
+
+const PERSONAL_NEARBY_MI = 0.5;   // mirrors the intranet's own family-spot
+                                  // radius, for the same reason: wider than
+                                  // Overpass's 220m to cover GPS drift and
+                                  // a "regular" that's the far end of a lot
+
 function renderPersonalOptions(loc, filterText) {
   const el = document.getElementById("personal-options");
   const q = (filterText || "").trim().toLowerCase();
-  const places = personalPlaces().filter((p) => !q || p.name.toLowerCase().includes(q));
+  let places = personalPlaces();
+  // Typing a name is a deliberate search across your whole history --
+  // browsing (no text yet) only shows what's actually near you, so a
+  // place from a trip months ago and a thousand miles away doesn't
+  // clutter the list every time you open the picker at home.
+  places = q
+    ? places.filter((p) => p.name.toLowerCase().includes(q))
+    : places.filter((p) => haversineMeters(loc.lat, loc.lon, p.lat, p.lon) / 1609.34 <= PERSONAL_NEARBY_MI);
   if (places.length === 0) { el.innerHTML = ""; return; }
   const header = q ? "" : `<div class="section-title" style="margin:0 0 8px;">Your places</div>`;
   el.innerHTML = header;
   for (const p of places) {
+    const doneToday = checkedInTodayLocally(p.name);
     const btn = document.createElement("button");
     btn.className = "place-option";
+    btn.disabled = doneToday;
     btn.innerHTML = `
       <div class="place-opt-main">
         <div class="place-opt-name">${escapeHtml(p.name)}<span class="visit-badge">×${p.count}</span></div>
         ${p.category ? `<div class="place-opt-detail">${escapeHtml(p.category)}</div>` : ""}
       </div>
-      <div class="place-opt-dist">★</div>`;
-    btn.addEventListener("click", () => {
-      commitCheckin({ name: p.name, category: p.category, lat: loc.lat, lon: loc.lon });
-    });
+      <div class="place-opt-dist">${doneToday ? "✓ today" : "★"}</div>`;
+    if (!doneToday) {
+      btn.addEventListener("click", () => {
+        commitCheckin({ name: p.name, category: p.category, lat: loc.lat, lon: loc.lon });
+      });
+    }
     el.appendChild(btn);
   }
 }
@@ -163,19 +191,27 @@ function renderFamilyOptions(data, loc) {
   if (data.lounges) {
     loungeEl.innerHTML = `<div class="section-title" style="margin:0 0 8px;">${escapeHtml(data.lounges.airport_name)} — family lounges</div>`;
     for (const l of data.lounges.lounges) {
+      // Lounges don't carry their own "last visited" from the intranet
+      // (travel_lounges' own ratings/visit tables are a separate concern
+      // from vacation_spot_visits) -- fall back to this device's local
+      // history by name, same signal the OSM list already uses below.
+      const doneToday = checkedInTodayLocally(l.name);
       const btn = document.createElement("button");
       btn.className = "place-option";
+      btn.disabled = doneToday;
       btn.innerHTML = `
         <div class="place-opt-main">
           <div class="place-opt-name">${escapeHtml(l.name)}${l.n_visits > 0 ? `<span class="visit-badge">×${l.n_visits}</span>` : ""}</div>
         </div>
-        <div class="place-opt-dist">${l.avg_score != null ? "★" + l.avg_score : ""}</div>`;
+        <div class="place-opt-dist">${doneToday ? "✓ today" : (l.avg_score != null ? "★" + l.avg_score : "")}</div>`;
       // A regular check-in, same as anything else -- deliberately not a
       // dedicated write into travel_lounges (that system's own ratings
       // stay web-only for now; this just needed to be a place you can tap).
-      btn.addEventListener("click", () => {
-        commitCheckin({ name: l.name, category: "Lounge", lat: loc.lat, lon: loc.lon });
-      });
+      if (!doneToday) {
+        btn.addEventListener("click", () => {
+          commitCheckin({ name: l.name, category: "Lounge", lat: loc.lat, lon: loc.lon });
+        });
+      }
       loungeEl.appendChild(btn);
     }
   }
@@ -185,15 +221,18 @@ function renderFamilyOptions(data, loc) {
     for (const s of data.spots) {
       const btn = document.createElement("button");
       btn.className = "place-option";
+      btn.disabled = s.visited_today;
       btn.innerHTML = `
         <div class="place-opt-main">
           <div class="place-opt-name">${escapeHtml(s.name)}<span class="visit-badge">×${s.nvisits}</span></div>
           ${s.kind ? `<div class="place-opt-detail">${escapeHtml(s.kind)}</div>` : ""}
         </div>
-        <div class="place-opt-dist">${s.dist_mi}mi</div>`;
-      btn.addEventListener("click", () => {
-        commitCheckin({ name: s.name, category: s.kind || "", lat: loc.lat, lon: loc.lon });
-      });
+        <div class="place-opt-dist">${s.visited_today ? "✓ today" : s.dist_mi + "mi"}</div>`;
+      if (!s.visited_today) {
+        btn.addEventListener("click", () => {
+          commitCheckin({ name: s.name, category: s.kind || "", lat: loc.lat, lon: loc.lon });
+        });
+      }
       familyEl.appendChild(btn);
     }
   }
@@ -252,18 +291,22 @@ function renderPlaceOptions(places, loc) {
   // How many times you've been to each (match by name) — shown as a little badge
   const visitCounts = countVisits();
   for (const p of places) {
+    const visits = visitCounts.get(p.name) || 0;
+    const doneToday = checkedInTodayLocally(p.name);
     const btn = document.createElement("button");
     btn.className = "place-option";
-    const visits = visitCounts.get(p.name) || 0;
+    btn.disabled = doneToday;
     btn.innerHTML = `
       <div class="place-opt-main">
         <div class="place-opt-name">${escapeHtml(p.name)}${visits > 0 ? `<span class="visit-badge">×${visits}</span>` : ""}</div>
         <div class="place-opt-detail">${escapeHtml(p.category)}</div>
       </div>
-      <div class="place-opt-dist">${Math.round(p.dist)}m</div>`;
-    btn.addEventListener("click", () => {
-      commitCheckin({ name: p.name, category: p.category, lat: loc.lat, lon: loc.lon, osmId: p.osmId });
-    });
+      <div class="place-opt-dist">${doneToday ? "✓ today" : Math.round(p.dist) + "m"}</div>`;
+    if (!doneToday) {
+      btn.addEventListener("click", () => {
+        commitCheckin({ name: p.name, category: p.category, lat: loc.lat, lon: loc.lon, osmId: p.osmId });
+      });
+    }
     optionsEl.appendChild(btn);
   }
 }

@@ -391,6 +391,10 @@ input,select{font-family:inherit;}
 }
 .place-option:hover{border-color:var(--teal);}
 .place-option:active{transform:scale(0.99);}
+.place-option:disabled{
+  opacity:0.45;
+  pointer-events:none;
+}
 .place-opt-main{flex:1;min-width:0;}
 .place-opt-name{
   font-weight:600;
