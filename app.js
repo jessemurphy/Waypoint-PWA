@@ -138,6 +138,67 @@ function renderPersonalOptions(loc, filterText) {
   }
 }
 
+/* ---------- family spots + lounges (shared, from the intranet) ---------- */
+// Waypoint's first read path — everything else it does with the intranet
+// is push-only (syncCheckin). Silent no-op whenever sync isn't configured,
+// offline, or the request fails: this is a bonus layer of suggestions on
+// top of a picker that already works fine without it.
+async function fetchNearbyFamily(lat, lon) {
+  const { url, token } = loadSync();
+  if (!url || !token) return null;
+  try {
+    const res = await fetch(url.replace(/\/+$/, "") + `/vacations/api/nearby?lat=${lat}&lon=${lon}`,
+                            { headers: { "X-Api-Key": token } });
+    return res.ok ? await res.json() : null;
+  } catch (e) { return null; }
+}
+
+function renderFamilyOptions(data, loc) {
+  const loungeEl = document.getElementById("lounge-callout");
+  const familyEl = document.getElementById("family-options");
+  loungeEl.innerHTML = "";
+  familyEl.innerHTML = "";
+  if (!data) return;   // sync unset, offline, or the request failed -- exact no-op
+
+  if (data.lounges) {
+    loungeEl.innerHTML = `<div class="section-title" style="margin:0 0 8px;">${escapeHtml(data.lounges.airport_name)} — family lounges</div>`;
+    for (const l of data.lounges.lounges) {
+      const btn = document.createElement("button");
+      btn.className = "place-option";
+      btn.innerHTML = `
+        <div class="place-opt-main">
+          <div class="place-opt-name">${escapeHtml(l.name)}${l.n_visits > 0 ? `<span class="visit-badge">×${l.n_visits}</span>` : ""}</div>
+        </div>
+        <div class="place-opt-dist">${l.avg_score != null ? "★" + l.avg_score : ""}</div>`;
+      // A regular check-in, same as anything else -- deliberately not a
+      // dedicated write into travel_lounges (that system's own ratings
+      // stay web-only for now; this just needed to be a place you can tap).
+      btn.addEventListener("click", () => {
+        commitCheckin({ name: l.name, category: "Lounge", lat: loc.lat, lon: loc.lon });
+      });
+      loungeEl.appendChild(btn);
+    }
+  }
+
+  if (data.spots && data.spots.length) {
+    familyEl.innerHTML = `<div class="section-title" style="margin:0 0 8px;">Family spots nearby</div>`;
+    for (const s of data.spots) {
+      const btn = document.createElement("button");
+      btn.className = "place-option";
+      btn.innerHTML = `
+        <div class="place-opt-main">
+          <div class="place-opt-name">${escapeHtml(s.name)}<span class="visit-badge">×${s.nvisits}</span></div>
+          ${s.kind ? `<div class="place-opt-detail">${escapeHtml(s.kind)}</div>` : ""}
+        </div>
+        <div class="place-opt-dist">${s.dist_mi}mi</div>`;
+      btn.addEventListener("click", () => {
+        commitCheckin({ name: s.name, category: s.kind || "", lat: loc.lat, lon: loc.lon });
+      });
+      familyEl.appendChild(btn);
+    }
+  }
+}
+
 /* ---------- check-in flow ---------- */
 async function startCheckin() {
   const btn = document.getElementById("checkin-btn");
@@ -168,7 +229,11 @@ function openPicker(loc) {
   optionsEl.innerHTML = `<div class="sheet-sub">Looking up nearby places…</div>`;
   document.getElementById("custom-name").value = "";
   document.getElementById("picker-overlay").classList.remove("hidden");
+  document.getElementById("lounge-callout").innerHTML = "";
+  document.getElementById("family-options").innerHTML = "";
   renderPersonalOptions(loc, "");
+
+  fetchNearbyFamily(loc.lat, loc.lon).then((data) => renderFamilyOptions(data, loc));
 
   fetchNearbyPlaces(loc.lat, loc.lon)
     .then((places) => renderPlaceOptions(places, loc))
