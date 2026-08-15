@@ -50,20 +50,26 @@ function getPosition() {
 
 /* ---------- nearby places via Overpass (OpenStreetMap) ---------- */
 async function fetchNearbyPlaces(lat, lon) {
-  const radius = 220; // meters
+  // 320m rather than 220: indoors a phone's GPS can drift 100m+, and a
+  // big store's mapped point is its building centroid, which can sit well
+  // away from where you're standing inside it.
+  const radius = 320; // meters
+  // nwr = node + way + relation in one clause. Large stores are often
+  // mapped as building ways or multipolygon relations — the old
+  // node/way-only query missed relations entirely.
   const query = `
 [out:json][timeout:10];
 (
-  node(around:${radius},${lat},${lon})["name"]["amenity"];
-  node(around:${radius},${lat},${lon})["name"]["shop"];
-  node(around:${radius},${lat},${lon})["name"]["leisure"];
-  node(around:${radius},${lat},${lon})["name"]["tourism"];
-  way(around:${radius},${lat},${lon})["name"]["amenity"];
-  way(around:${radius},${lat},${lon})["name"]["shop"];
-  way(around:${radius},${lat},${lon})["name"]["leisure"];
-  way(around:${radius},${lat},${lon})["name"]["tourism"];
+  nwr(around:${radius},${lat},${lon})["name"]["amenity"];
+  nwr(around:${radius},${lat},${lon})["name"]["shop"];
+  nwr(around:${radius},${lat},${lon})["name"]["leisure"];
+  nwr(around:${radius},${lat},${lon})["name"]["tourism"];
 );
-out center 25;`;
+out center 80;`;
+  // "out center 80" not 25: Overpass truncates BEFORE we can sort by
+  // distance, and it lists nodes ahead of ways — so in a dense shopping
+  // strip, 25 small named nodes could crowd out the very building you're
+  // standing in. Distance sorting below still trims the list to 12.
   const res = await fetch("https://overpass-api.de/api/interpreter", {
     method: "POST",
     body: "data=" + encodeURIComponent(query),
@@ -71,12 +77,10 @@ out center 25;`;
   });
   if (!res.ok) throw new Error("Overpass " + res.status);
   const data = await res.json();
-  const seen = new Set();
   const places = [];
   for (const el of data.elements || []) {
     const name = el.tags && el.tags.name;
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
+    if (!name) continue;
     const plat = el.lat ?? (el.center && el.center.lat);
     const plon = el.lon ?? (el.center && el.center.lon);
     if (plat == null) continue;
@@ -93,7 +97,16 @@ out center 25;`;
     });
   }
   places.sort((a, b) => a.dist - b.dist);
-  return places.slice(0, 12);
+  // Dedupe by name AFTER sorting so the closest instance wins (a store's
+  // door node and its building way share a name — keep the nearer one).
+  const seen = new Set();
+  const unique = [];
+  for (const p of places) {
+    if (seen.has(p.name)) continue;
+    seen.add(p.name);
+    unique.push(p);
+  }
+  return unique.slice(0, 12);
 }
 
 /* ---------- personal places (reusable custom entries) ---------- */
