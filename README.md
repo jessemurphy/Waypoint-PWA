@@ -27,8 +27,8 @@ cd waypoint-pwa
 python3 -m http.server 8080     # local test at http://localhost:8080
 ```
 
-For real phone use, host it (GitHub + Netlify works great — `netlify.toml` is included
-and `deploy.sh` handles commit+push). Then on iPhone: open the URL in Safari →
+For real phone use, host it on GitHub Pages (this repo deploys from `main`
+— push to `main` and Pages redeploys in a minute or two). Then on iPhone: open the URL in Safari →
 Share → Add to Home Screen.
 
 **iOS note:** the first check-in will prompt for location permission. If you decline it
