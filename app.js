@@ -492,9 +492,12 @@ function saveEdit() {
   const note = document.getElementById("edit-note").value.trim();
   const noteChanged = (c.note || "") !== note;
   if (note) c.note = note; else delete c.note;
-  // a new/changed note re-queues the stamp so the intranet hears about it;
-  // the server dedupes by client_id, so the visit itself never duplicates
-  if (noteChanged) c.synced = false;
+  // Any save of a stamp that carries a note re-queues it — not just when
+  // the note text changed. That heals notes typed before the server could
+  // accept them: once the intranet updates, re-saving the stamp delivers
+  // the note. Safe because the server dedupes the visit by client_id and
+  // the note-comment by identical body.
+  if (note || noteChanged) c.synced = false;
   if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; }
   else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); }
   save();
