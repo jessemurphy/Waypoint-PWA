@@ -338,6 +338,7 @@ function commitCheckin({ name, category, lat, lon, osmId }) {
   closePicker();
   render();
   toast(`Stamped: ${name}`);
+  offerContext(c.id);
   syncCheckin(c);   // best-effort, silent on failure — stays queued for the next flush
 }
 
@@ -349,6 +350,41 @@ function commitCheckin({ name, category, lat, lon, osmId }) {
 // check-in just stays local — it's already saved either way — and gets
 // retried the next time the app opens or a sync setting is saved.
 const SYNC_KEY = "waypoint:sync:v1";
+
+/* ---------- photos: IndexedDB keyed by stamp id ---------- */
+let pdb;
+const pdbReady = new Promise((res) => {
+  const r = indexedDB.open("waypoint-photos", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("photos");
+  r.onsuccess = () => { pdb = r.result; res(); };
+  r.onerror = () => res();     // no IDB: photos off, everything else works
+});
+const photoPut = (k, v) => new Promise((res) => { if (!pdb) return res();
+  const t = pdb.transaction("photos", "readwrite");
+  t.objectStore("photos").put(v, k); t.oncomplete = res; });
+const photoGet = (k) => new Promise((res) => { if (!pdb || !k) return res(null);
+  const q = pdb.transaction("photos").objectStore("photos").get(k);
+  q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+const photoDel = (k) => new Promise((res) => { if (!pdb || !k) return res();
+  const t = pdb.transaction("photos", "readwrite");
+  t.objectStore("photos").delete(k); t.oncomplete = res; });
+function downscalePhoto(file) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 1280;
+      const sc = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * sc);
+      cv.height = Math.round(img.height * sc);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(img.src);
+      res(cv.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = () => res(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
 
 function loadSync() {
   try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; }
@@ -366,7 +402,7 @@ async function syncCheckin(c) {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": token },
       body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts,
-                             client_id: c.id }),
+                             note: c.note || "", client_id: c.id }),
     });
     if (res.ok) { c.synced = true; save(); }
   } catch (e) { /* offline or unreachable — stays queued */ }
@@ -403,6 +439,17 @@ function closePicker() {
 }
 
 /* ---------- edit flow ---------- */
+/* After a stamp lands, quietly offer to add context. Ignoring it costs
+   nothing — it fades on its own; tapping opens the stamp's edit sheet. */
+function offerContext(id) {
+  const n = document.getElementById("context-nudge");
+  n.classList.remove("hidden");
+  clearTimeout(offerContext._t);
+  n.onclick = () => { n.classList.add("hidden"); openEdit(id); };
+  offerContext._t = setTimeout(() => n.classList.add("hidden"), 6000);
+}
+
+let editPhoto = null;   // null = unchanged, "remove", or a new dataURL
 function openEdit(id) {
   const c = state.checkins.find((x) => x.id === id);
   if (!c) return;
@@ -413,6 +460,19 @@ function openEdit(id) {
   const pad = (n) => String(n).padStart(2, "0");
   document.getElementById("edit-time").value =
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  document.getElementById("edit-note").value = c.note || "";
+  editPhoto = null;
+  const thumb = document.getElementById("edit-photo-thumb");
+  const btn = document.getElementById("edit-photo-btn");
+  const rm = document.getElementById("edit-photo-remove");
+  thumb.classList.add("hidden"); rm.classList.add("hidden");
+  btn.textContent = "Add photo";
+  if (c.photo) photoGet(c.photo).then((d) => {
+    if (d && editingId === id && editPhoto === null){
+      thumb.src = d; thumb.classList.remove("hidden");
+      rm.classList.remove("hidden"); btn.textContent = "Replace photo";
+    }
+  });
   document.getElementById("edit-overlay").classList.remove("hidden");
 }
 function closeEdit() {
@@ -428,12 +488,18 @@ function saveEdit() {
   if (!timeVal) { toast("Pick a time"); return; }
   c.name = name;
   c.ts = new Date(timeVal).toISOString();
+  const note = document.getElementById("edit-note").value.trim();
+  if (note) c.note = note; else delete c.note;
+  if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; }
+  else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); }
   save();
   closeEdit();
   render();
   toast("Updated");
 }
 function deleteEdit() {
+  const gone = state.checkins.find((x) => x.id === editingId);
+  if (gone && gone.photo) photoDel(gone.photo);
   state.checkins = state.checkins.filter((x) => x.id !== editingId);
   save();
   closeEdit();
@@ -540,9 +606,17 @@ function stampCard(c, visitCounts) {
       <div class="stamp-coords">${fmtCoords(c.lat, c.lon)}</div>
       ${c.category ? `<div class="stamp-cat">${escapeHtml(c.category)}</div>` : ""}
     </div>
+    ${c.note ? `<div class="stamp-note">${escapeHtml(c.note)}</div>` : ""}
     <div class="stamp-actions">
       <button class="mini-btn" data-act="edit" title="Edit">✎</button>
     </div>`;
+  if (c.photo) photoGet(c.photo).then((d) => {
+    if (!d) return;
+    const img = document.createElement("img");
+    img.className = "stamp-photo";
+    img.src = d; img.alt = "";
+    card.appendChild(img);
+  });
   card.querySelector('[data-act="edit"]').addEventListener("click", (e) => {
     e.stopPropagation();
     openEdit(c.id);
@@ -587,8 +661,12 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+async function exportData() {
+  const photos = {};
+  for (const ci of state.checkins){
+    if (ci.photo){ const d = await photoGet(ci.photo); if (d) photos[ci.photo] = d; }
+  }
+  const blob = new Blob([JSON.stringify({ ...state, photos }, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -614,7 +692,9 @@ function importData(file) {
         }
       } else {
         state = parsed;
+        delete state.photos;
       }
+      for (const [k, v] of Object.entries(parsed.photos || {})) photoPut(k, v);
       save();
       render();
       toast("Imported");
@@ -670,6 +750,26 @@ function init() {
   });
 
   document.getElementById("edit-cancel").addEventListener("click", closeEdit);
+  document.getElementById("edit-photo-btn").addEventListener("click",
+    () => document.getElementById("edit-photo-file").click());
+  document.getElementById("edit-photo-file").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const d = await downscalePhoto(f);
+    if (!d) { toast("Couldn't read that photo"); return; }
+    editPhoto = d;
+    const thumb = document.getElementById("edit-photo-thumb");
+    thumb.src = d; thumb.classList.remove("hidden");
+    document.getElementById("edit-photo-remove").classList.remove("hidden");
+    document.getElementById("edit-photo-btn").textContent = "Replace photo";
+  });
+  document.getElementById("edit-photo-remove").addEventListener("click", () => {
+    editPhoto = "remove";
+    document.getElementById("edit-photo-thumb").classList.add("hidden");
+    document.getElementById("edit-photo-remove").classList.add("hidden");
+    document.getElementById("edit-photo-btn").textContent = "Add photo";
+  });
   document.getElementById("edit-save").addEventListener("click", saveEdit);
   document.getElementById("edit-delete").addEventListener("click", deleteEdit);
 
@@ -702,7 +802,8 @@ function init() {
     navigator.serviceWorker.register("sw.js").catch((err) => console.warn("SW failed", err));
   }
 
-  render();
+  // photos live in IndexedDB — wait for it so the first render shows them
+  pdbReady.then(render);
   flushPendingSync();
 }
 

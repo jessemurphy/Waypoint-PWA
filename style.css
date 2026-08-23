@@ -524,3 +524,17 @@ input,select{font-family:inherit;}
 @media (prefers-reduced-motion: reduce){
   *{animation:none !important;transition:none !important;}
 }
+
+/* optional note / photo on a stamp */
+#edit-note{width:100%;font:inherit;color:var(--ink);background:var(--surface, var(--bg));
+  border:1px solid rgba(255,255,255,0.14);border-radius:8px;padding:9px 10px;resize:vertical;}
+.photo-row{display:flex;gap:10px;align-items:center;}
+#edit-photo-thumb{width:56px;height:56px;object-fit:cover;border-radius:8px;}
+.stamp-note{font-size:13px;color:var(--ink-dim, inherit);opacity:.85;margin-top:5px;
+  line-height:1.45;overflow-wrap:anywhere;}
+.stamp-photo{width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-top:8px;}
+.context-nudge{position:fixed;bottom:calc(64px + env(safe-area-inset-bottom));
+  left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:13px;
+  padding:10px 16px;border-radius:999px;border:none;cursor:pointer;
+  background:var(--brass, #C9A227);color:#141414;font-weight:700;z-index:60;
+  box-shadow:0 4px 14px rgba(0,0,0,.35);}
