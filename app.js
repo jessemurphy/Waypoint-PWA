@@ -418,7 +418,10 @@ async function syncCheckin(c) {
                              note: c.note || "", person: person || "", with: c.with || [],
                              client_id: c.id }),
     });
-    if (res.ok) { c.synced = true; save(); }
+    if (res.ok) {
+      c.synced = true; save();
+      if (c.photo && !c.photoSynced) await syncPhoto(c);
+    }
     else if (res.status === 400) {
       // the server names what it rejected (an unknown username, usually) —
       // stays queued; fix the spelling in the stamp's edit sheet
@@ -426,6 +429,29 @@ async function syncCheckin(c) {
       if (body && body.unknown) toast("Unknown on familynet: " + body.unknown.join(", "));
       else if (body && body.error) toast("Sync refused: " + body.error);
     }
+  } catch (e) { /* offline or unreachable — stays queued */ }
+  renderSyncStatus();
+}
+
+async function syncPhoto(c) {
+  // The stamp's one photo, sent SEPARATELY from the check-in and only after
+  // it succeeded — the server addresses the visit by the client_id the
+  // check-in already deduped on, and the two retry independently. A re-send
+  // replaces the stored photo server-side, so repeating is harmless.
+  const { url, token, person } = loadSync();
+  if (!url || !token || !c.photo || c.photoSynced || !c.synced) return;
+  const data = await photoGet(c.photo);
+  if (!data) { c.photoSynced = true; save(); return; }  // lost locally — nothing to send
+  try {
+    const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/checkin_photo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Api-Key": token },
+      body: JSON.stringify({ client_id: c.id, person: person || "", photo: data }),
+    });
+    if (res.ok) { c.photoSynced = true; save(); }
+    // Anything else stays queued: a 404 means the check-in hasn't landed
+    // server-side yet, and our own downscale always produces a small valid
+    // JPEG, so a 4xx here really means the intranet isn't updated yet.
   } catch (e) { /* offline or unreachable — stays queued */ }
   renderSyncStatus();
 }
@@ -439,7 +465,8 @@ async function flushPendingSync() {
   // each request either sees the previous one already committed, or is the
   // first (now also guarded server-side, but no reason to lean on that).
   for (const c of state.checkins) {
-    if (!c.synced) await syncCheckin(c);
+    if (!c.synced) await syncCheckin(c);           // chains to its photo on success
+    else if (c.photo && !c.photoSynced) await syncPhoto(c);
   }
 }
 
@@ -448,7 +475,7 @@ function renderSyncStatus() {
   if (!el) return;
   const { url, token } = loadSync();
   if (!url || !token) { el.textContent = "Not connected"; return; }
-  const pending = state.checkins.filter((c) => !c.synced).length;
+  const pending = state.checkins.filter((c) => !c.synced || (c.photo && !c.photoSynced)).length;
   el.textContent = pending === 0
     ? `Connected — all ${state.checkins.length} synced`
     : `Connected — ${pending} pending`;
@@ -523,13 +550,14 @@ function saveEdit() {
   // the note. Safe because the server dedupes the visit by client_id and
   // the note-comment by identical body.
   if (note || noteChanged || withList.length || withChanged) c.synced = false;
-  if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; }
-  else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); }
+  if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; delete c.photoSynced; }
+  else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); c.photoSynced = false; }
   save();
   closeEdit();
   render();
   toast("Updated");
   if (!c.synced) syncCheckin(c);
+  else if (c.photo && !c.photoSynced) syncPhoto(c);
 }
 function deleteEdit() {
   const gone = state.checkins.find((x) => x.id === editingId);

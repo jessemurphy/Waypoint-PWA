@@ -1,4 +1,4 @@
-const CACHE = "waypoint-v6";
+const CACHE = "waypoint-v7";
 const ASSETS = [
   "./",
   "./index.html",
