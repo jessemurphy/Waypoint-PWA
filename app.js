@@ -391,8 +391,20 @@ function loadSync() {
   catch { return {}; }
 }
 function saveSyncSettings(url, token, person) {
+  const prev = loadSync();
+  person = (person || "").trim();
   localStorage.setItem(SYNC_KEY, JSON.stringify({ url: url.trim(), token: token.trim(),
-                                                  person: (person || "").trim() }));
+                                                  person }));
+  // A newly-set (or corrected) username re-queues every synced stamp:
+  // anything that went up before it was filled in landed on familynet with
+  // no person attached, and only a re-send of the same client_id can claim
+  // it. Safe to repeat — the server dedupes by client_id and only ever
+  // adopts a username onto a visit that has none, never reattributes one.
+  if (person && person !== (prev.person || "")) {
+    let n = 0;
+    for (const c of state.checkins) if (c.synced) { c.synced = false; n++; }
+    if (n) { save(); toast(`Re-syncing ${n} stamp${n > 1 ? "s" : ""} as ${person}`); }
+  }
 }
 
 async function syncCheckin(c) {
