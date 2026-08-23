@@ -390,19 +390,20 @@ function loadSync() {
   try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; }
   catch { return {}; }
 }
-function saveSyncSettings(url, token) {
-  localStorage.setItem(SYNC_KEY, JSON.stringify({ url: url.trim(), token: token.trim() }));
+function saveSyncSettings(url, token, person) {
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ url: url.trim(), token: token.trim(),
+                                                  person: (person || "").trim() }));
 }
 
 async function syncCheckin(c) {
-  const { url, token } = loadSync();
+  const { url, token, person } = loadSync();
   if (!url || !token || c.synced) return;
   try {
     const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/checkin", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": token },
       body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts,
-                             note: c.note || "", client_id: c.id }),
+                             note: c.note || "", person: person || "", client_id: c.id }),
     });
     if (res.ok) { c.synced = true; save(); }
   } catch (e) { /* offline or unreachable — stays queued */ }
@@ -782,6 +783,7 @@ function init() {
     const { url, token } = loadSync();
     document.getElementById("sync-url").value = url || "";
     document.getElementById("sync-token").value = token || "";
+    document.getElementById("sync-person").value = (loadSync().person) || "";
     renderSyncStatus();
     document.getElementById("menu-overlay").classList.remove("hidden");
   });
@@ -797,7 +799,8 @@ function init() {
   });
   document.getElementById("sync-save").addEventListener("click", () => {
     saveSyncSettings(document.getElementById("sync-url").value,
-                     document.getElementById("sync-token").value);
+                     document.getElementById("sync-token").value,
+                     document.getElementById("sync-person").value);
     renderSyncStatus();
     toast("Sync settings saved");
     flushPendingSync();
