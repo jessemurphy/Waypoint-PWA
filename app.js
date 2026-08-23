@@ -403,9 +403,17 @@ async function syncCheckin(c) {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": token },
       body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts,
-                             note: c.note || "", person: person || "", client_id: c.id }),
+                             note: c.note || "", person: person || "", with: c.with || [],
+                             client_id: c.id }),
     });
     if (res.ok) { c.synced = true; save(); }
+    else if (res.status === 400) {
+      // the server names what it rejected (an unknown username, usually) —
+      // stays queued; fix the spelling in the stamp's edit sheet
+      const body = await res.json().catch(() => null);
+      if (body && body.unknown) toast("Unknown on familynet: " + body.unknown.join(", "));
+      else if (body && body.error) toast("Sync refused: " + body.error);
+    }
   } catch (e) { /* offline or unreachable — stays queued */ }
   renderSyncStatus();
 }
@@ -462,6 +470,7 @@ function openEdit(id) {
   document.getElementById("edit-time").value =
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   document.getElementById("edit-note").value = c.note || "";
+  document.getElementById("edit-with").value = (c.with || []).join(", ");
   editPhoto = null;
   const thumb = document.getElementById("edit-photo-thumb");
   const btn = document.getElementById("edit-photo-btn");
@@ -492,12 +501,16 @@ function saveEdit() {
   const note = document.getElementById("edit-note").value.trim();
   const noteChanged = (c.note || "") !== note;
   if (note) c.note = note; else delete c.note;
+  const withList = document.getElementById("edit-with").value
+    .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 20);
+  const withChanged = JSON.stringify(withList) !== JSON.stringify(c.with || []);
+  if (withList.length) c.with = withList; else delete c.with;
   // Any save of a stamp that carries a note re-queues it — not just when
   // the note text changed. That heals notes typed before the server could
   // accept them: once the intranet updates, re-saving the stamp delivers
   // the note. Safe because the server dedupes the visit by client_id and
   // the note-comment by identical body.
-  if (note || noteChanged) c.synced = false;
+  if (note || noteChanged || withList.length || withChanged) c.synced = false;
   if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; }
   else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); }
   save();
@@ -615,6 +628,7 @@ function stampCard(c, visitCounts) {
       <div class="stamp-coords">${fmtCoords(c.lat, c.lon)}</div>
       ${c.category ? `<div class="stamp-cat">${escapeHtml(c.category)}</div>` : ""}
     </div>
+    ${c.with && c.with.length ? `<div class="stamp-note">with ${escapeHtml(c.with.join(", "))}</div>` : ""}
     ${c.note ? `<div class="stamp-note">${escapeHtml(c.note)}</div>` : ""}
     <div class="stamp-actions">
       <button class="mini-btn" data-act="edit" title="Edit">✎</button>
