@@ -489,13 +489,18 @@ function saveEdit() {
   c.name = name;
   c.ts = new Date(timeVal).toISOString();
   const note = document.getElementById("edit-note").value.trim();
+  const noteChanged = (c.note || "") !== note;
   if (note) c.note = note; else delete c.note;
+  // a new/changed note re-queues the stamp so the intranet hears about it;
+  // the server dedupes by client_id, so the visit itself never duplicates
+  if (noteChanged) c.synced = false;
   if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; }
   else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); }
   save();
   closeEdit();
   render();
   toast("Updated");
+  if (!c.synced) syncCheckin(c);
 }
 function deleteEdit() {
   const gone = state.checkins.find((x) => x.id === editingId);
