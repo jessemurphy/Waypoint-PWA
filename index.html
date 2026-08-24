@@ -135,7 +135,7 @@
       <label>Sync token</label>
       <div style="display:flex;gap:8px;align-items:center;">
         <input type="password" id="sync-token" placeholder="Shared token" autocomplete="off" style="flex:1;min-width:0;">
-        <button type="button" id="token-show" class="btn-secondary" style="width:auto;padding:10px 14px;">Show</button>
+        <button type="button" id="token-show" class="btn-secondary" style="width:auto;padding:10px 14px;" onclick="var f=document.getElementById('sync-token'),s=f.type==='text';f.type=s?'password':'text';this.textContent=s?'Show':'Hide'">Show</button>
       </div>
     </div>
     <div class="field">
@@ -145,6 +145,7 @@
     </div>
     <p class="sheet-note" id="sync-status" style="margin-top:0;">Not connected</p>
     <button class="btn-secondary" id="sync-save" style="width:100%;">Save sync settings</button>
+    <p class="sheet-note" style="opacity:.55;">Waypoint v9</p>
 
     <button class="sheet-cancel" id="menu-close">Close</button>
   </div>

@@ -854,14 +854,6 @@ function init() {
     if (e.target.files[0]) importData(e.target.files[0]);
     e.target.value = "";
   });
-  // the token field prefills from storage but renders masked -- this is how
-  // you read it back off a phone to copy into another family app
-  document.getElementById("token-show").addEventListener("click", () => {
-    const f = document.getElementById("sync-token");
-    const showing = f.type === "text";
-    f.type = showing ? "password" : "text";
-    document.getElementById("token-show").textContent = showing ? "Show" : "Hide";
-  });
   document.getElementById("sync-save").addEventListener("click", () => {
     saveSyncSettings(document.getElementById("sync-url").value,
                      document.getElementById("sync-token").value,
