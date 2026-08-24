@@ -133,7 +133,10 @@
     </div>
     <div class="field">
       <label>Sync token</label>
-      <input type="password" id="sync-token" placeholder="Shared token" autocomplete="off">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="password" id="sync-token" placeholder="Shared token" autocomplete="off" style="flex:1;min-width:0;">
+        <button type="button" id="token-show" class="btn-secondary" style="width:auto;padding:10px 14px;">Show</button>
+      </div>
     </div>
     <div class="field">
       <label>Your familynet username</label>
