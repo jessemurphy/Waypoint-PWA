@@ -42,3 +42,17 @@ Safari Websites (or the installed app's name).
   sent is your coordinates for the radius search, nothing is stored server-side by this app
 - Overpass is a free community service; if it's busy, lookup can occasionally fail —
   the app degrades to "name it yourself" rather than blocking the check-in
+
+## Photos and orientation
+
+A stamp's photo is downscaled on the phone (long edge 1280, q0.8) and sent as a
+data URL. **Rotate** on the edit sheet turns it in quarter-turns and, once you
+save, re-sends it — the server REPLACES a re-sent photo, so the site ends up
+with the same orientation you see here.
+
+Rotation only travels PHONE -> SITE. Waypoint shows its own local copy from
+IndexedDB and never reads the photo back, so rotating on the website does not
+reach the phone. If the two disagree, rotate here and save.
+
+Turns are always applied to the original rather than to the last result, so
+four taps returns exactly the photo you started with and sends nothing.

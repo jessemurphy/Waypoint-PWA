@@ -386,6 +386,32 @@ function downscalePhoto(file) {
   });
 }
 
+/* Quarter-turns clockwise, re-encoded through a canvas.
+   ALWAYS APPLIED TO THE ORIGINAL, never to the last result: rotating four
+   times would otherwise be four JPEG re-encodes of a re-encode, and turning
+   back to where you started would not give you back the photo you had. The
+   caller keeps the untouched source and a turn count; this renders the two. */
+function rotatePhoto(dataUrl, turns) {
+  turns = ((turns % 4) + 4) % 4;
+  if (!turns) return Promise.resolve(dataUrl);
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => {
+      const swap = turns % 2 === 1;
+      const cv = document.createElement("canvas");
+      cv.width = swap ? img.height : img.width;
+      cv.height = swap ? img.width : img.height;
+      const cx = cv.getContext("2d");
+      cx.translate(cv.width / 2, cv.height / 2);
+      cx.rotate(turns * Math.PI / 2);
+      cx.drawImage(img, -img.width / 2, -img.height / 2);
+      res(cv.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = () => res(null);
+    img.src = dataUrl;
+  });
+}
+
 function loadSync() {
   try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; }
   catch { return {}; }
@@ -498,6 +524,12 @@ function offerContext(id) {
 }
 
 let editPhoto = null;   // null = unchanged, "remove", or a new dataURL
+// What rotation works from: the photo as it was when this sheet opened (or
+// the one just picked), plus quarter-turns. Kept apart from editPhoto so a
+// turn back to 0 means "unchanged" again and sends nothing.
+let editPhotoBase = null;
+let editPhotoTurns = 0;
+let editPhotoIsNew = false;
 function openEdit(id) {
   const c = state.checkins.find((x) => x.id === id);
   if (!c) return;
@@ -510,16 +542,19 @@ function openEdit(id) {
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   document.getElementById("edit-note").value = c.note || "";
   document.getElementById("edit-with").value = (c.with || []).join(", ");
-  editPhoto = null;
+  editPhoto = null; editPhotoBase = null; editPhotoTurns = 0; editPhotoIsNew = false;
   const thumb = document.getElementById("edit-photo-thumb");
   const btn = document.getElementById("edit-photo-btn");
   const rm = document.getElementById("edit-photo-remove");
-  thumb.classList.add("hidden"); rm.classList.add("hidden");
+  const rot = document.getElementById("edit-photo-rotate");
+  thumb.classList.add("hidden"); rm.classList.add("hidden"); rot.classList.add("hidden");
   btn.textContent = "Add photo";
   if (c.photo) photoGet(c.photo).then((d) => {
     if (d && editingId === id && editPhoto === null){
+      editPhotoBase = d;
       thumb.src = d; thumb.classList.remove("hidden");
-      rm.classList.remove("hidden"); btn.textContent = "Replace photo";
+      rm.classList.remove("hidden"); rot.classList.remove("hidden");
+      btn.textContent = "Replace photo";
     }
   });
   document.getElementById("edit-overlay").classList.remove("hidden");
@@ -822,15 +857,28 @@ function init() {
     const d = await downscalePhoto(f);
     if (!d) { toast("Couldn't read that photo"); return; }
     editPhoto = d;
+    editPhotoBase = d; editPhotoTurns = 0; editPhotoIsNew = true;
     const thumb = document.getElementById("edit-photo-thumb");
     thumb.src = d; thumb.classList.remove("hidden");
     document.getElementById("edit-photo-remove").classList.remove("hidden");
+    document.getElementById("edit-photo-rotate").classList.remove("hidden");
     document.getElementById("edit-photo-btn").textContent = "Replace photo";
+  });
+  document.getElementById("edit-photo-rotate").addEventListener("click", async () => {
+    if (!editPhotoBase) return;
+    editPhotoTurns = (editPhotoTurns + 1) % 4;
+    const out = await rotatePhoto(editPhotoBase, editPhotoTurns);
+    if (!out) { toast("Couldn't rotate that photo"); return; }
+    document.getElementById("edit-photo-thumb").src = out;
+    // back where it started AND it was already on the stamp: nothing to send
+    editPhoto = (!editPhotoTurns && !editPhotoIsNew) ? null : out;
   });
   document.getElementById("edit-photo-remove").addEventListener("click", () => {
     editPhoto = "remove";
+    editPhotoBase = null; editPhotoTurns = 0;
     document.getElementById("edit-photo-thumb").classList.add("hidden");
     document.getElementById("edit-photo-remove").classList.add("hidden");
+    document.getElementById("edit-photo-rotate").classList.add("hidden");
     document.getElementById("edit-photo-btn").textContent = "Add photo";
   });
   document.getElementById("edit-save").addEventListener("click", saveEdit);
