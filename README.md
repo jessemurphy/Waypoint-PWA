@@ -56,3 +56,22 @@ reach the phone. If the two disagree, rotate here and save.
 
 Turns are always applied to the original rather than to the last result, so
 four taps returns exactly the photo you started with and sends nothing.
+
+## Sharing a stamp
+
+A stamp with a photo gets a **Share** button on the photo itself — one tap
+composes a card (the photo square, then the place, the date, who you were with
+and your note) and hands it straight to the OS share sheet. Where file sharing
+isn't available, it saves the image instead.
+
+It sits on the photo rather than in the card's action tray because that tray is
+tap-to-reveal, which would have made sharing two taps.
+
+**Every step from the tap to the share sheet is synchronous, deliberately.**
+iOS only allows `navigator.share()` while the tap that triggered it is still
+active, and an `await` — reading the photo back out of IndexedDB, or
+`canvas.toBlob`'s callback — drops that activation and the sheet silently
+refuses. So the card is drawn from the `<img>` already on screen, and the JPEG
+goes through `toDataURL` + `atob` rather than `toBlob`. The button only appears
+once that image has decoded, since an unloaded one has `naturalWidth` 0 and
+would draw a blank card rather than fail.

@@ -532,7 +532,23 @@ input,select{font-family:inherit;}
 #edit-photo-thumb{width:56px;height:56px;object-fit:cover;border-radius:8px;}
 .stamp-note{font-size:13px;color:var(--ink-dim, inherit);opacity:.85;margin-top:5px;
   line-height:1.45;overflow-wrap:anywhere;}
-.stamp-photo{width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-top:8px;}
+.stamp-photo{width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-top:8px;display:block;}
+/* Sits on the photo so sharing is ONE tap. The action tray above it is
+   hover/tap-to-reveal, which would have made it two. */
+.stamp-photowrap{position:relative;}
+.share-btn{
+  position:absolute;right:8px;bottom:8px;
+  background:rgba(16,27,23,.78);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  border:1px solid var(--line-strong);
+  color:var(--ink);
+  font-family:var(--body);font-size:12px;font-weight:600;
+  padding:7px 12px;border-radius:999px;cursor:pointer;
+  /* a real tap target: the glyph alone measured well under the 44px a finger
+     needs, and this one sits over a photo where a miss does nothing visible */
+  min-height:34px;
+}
+.share-btn:active{background:var(--teal);color:#0d1a15;}
 .context-nudge{position:fixed;bottom:calc(64px + env(safe-area-inset-bottom));
   left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:13px;
   padding:10px 16px;border-radius:999px;border:none;cursor:pointer;

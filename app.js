@@ -412,6 +412,134 @@ function rotatePhoto(dataUrl, turns) {
   });
 }
 
+/* ---------- the shareable card ---------- */
+
+const CARD_W = 1080, CARD_PHOTO = 1080, CARD_PAD = 64;
+
+function _wrap(cx, text, maxW, maxLines) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (cx.measureText(test).width <= maxW) { line = test; continue; }
+    if (line) lines.push(line);
+    line = w;
+    if (lines.length === maxLines) break;
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  if (lines.length === maxLines && words.length) {
+    // only ellipsise if something actually got cut
+    const shown = lines.join(" ").split(/\s+/).length;
+    if (shown < words.length) {
+      while (lines[maxLines - 1] &&
+             cx.measureText(lines[maxLines - 1] + "\u2026").width > maxW) {
+        lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*\S+$/, "");
+      }
+      lines[maxLines - 1] += "\u2026";
+    }
+  }
+  return lines;
+}
+
+/* Draws the stamp as one image: the photo square on top, a caption band under
+   it. Takes an ALREADY-LOADED <img> rather than a data URL on purpose — see
+   shareCard() for why every step of this has to stay synchronous.
+
+   The band is built as a LIST of lines first and then both measured and drawn
+   from that one list, so the height it reserves and the height it uses cannot
+   drift apart — the usual way this kind of card ends up clipping its last
+   line. */
+function drawCard(img, c) {
+  const cv = document.createElement("canvas");
+  const cx = cv.getContext("2d");
+  const body = '"Inter",-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif';
+  const W = CARD_W - CARD_PAD * 2;
+  const F = { name: `600 52px ${body}`, meta: `400 30px ${body}`,
+              note: `400 34px ${body}` };
+
+  const lines = [];                      // {font, fill, text, after}
+  cx.font = F.name;
+  for (const t of _wrap(cx, c.name, W, 2))
+    lines.push({ font: F.name, fill: "#E9EFE4", text: t, after: 62 });
+  lines[lines.length - 1].after += 10;   // breathe before the metadata
+
+  lines.push({ font: F.meta, fill: "#6E7F76", after: 42,
+    text: new Date(c.ts).toLocaleDateString(undefined,
+      { weekday: "long", month: "long", day: "numeric", year: "numeric" }) });
+  if (c.with && c.with.length)
+    lines.push({ font: F.meta, fill: "#BCC7BB", after: 42,
+                 text: "with " + c.with.join(", ") });
+  if (c.note) {
+    cx.font = F.note;
+    const nl = _wrap(cx, c.note, W, 3);
+    lines[lines.length - 1].after += 16;  // the prose is its own block
+    for (const t of nl)
+      lines.push({ font: F.note, fill: "#BCC7BB", text: t, after: 46 });
+  }
+
+  const bandH = CARD_PAD + 44 +
+                lines.reduce((n, l) => n + l.after, 0) - lines[lines.length - 1].after
+                + 46 + CARD_PAD;
+  cv.width = CARD_W; cv.height = CARD_PHOTO + bandH;
+
+  // photo, cropped to fill the square rather than letterboxed
+  const s = Math.max(CARD_PHOTO / img.naturalWidth, CARD_PHOTO / img.naturalHeight);
+  const w = img.naturalWidth * s, h = img.naturalHeight * s;
+  cx.fillStyle = "#101B17"; cx.fillRect(0, 0, cv.width, cv.height);
+  cx.drawImage(img, (CARD_W - w) / 2, (CARD_PHOTO - h) / 2, w, h);
+
+  cx.fillStyle = "#18261F"; cx.fillRect(0, CARD_PHOTO, CARD_W, bandH);
+  cx.fillStyle = "#3FA88E"; cx.fillRect(0, CARD_PHOTO, CARD_W, 6);
+
+  let y = CARD_PHOTO + CARD_PAD + 44;
+  for (const l of lines) {
+    cx.font = l.font; cx.fillStyle = l.fill;
+    cx.fillText(l.text, CARD_PAD, y);
+    y += l.after;
+  }
+  return cv;
+}
+
+/* ONE TAP: compose and hand straight to the OS share sheet.
+
+   EVERY STEP IS SYNCHRONOUS, which is the whole design. iOS Safari only allows
+   navigator.share() while the tap that triggered it is still "active", and an
+   await — reading the photo back out of IndexedDB, or canvas.toBlob's callback
+   — drops that activation and the sheet silently refuses. So the photo comes
+   from the <img> the card has already decoded, and the JPEG goes through
+   toDataURL + atob rather than toBlob, because both of those return rather
+   than call back. */
+function shareCard(c, img) {
+  let file;
+  try {
+    const url = drawCard(img, c).toDataURL("image/jpeg", 0.9);
+    const bin = atob(url.slice(url.indexOf(",") + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const slug = (c.name || "waypoint").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "waypoint";
+    file = new File([bytes], `${slug}.jpg`, { type: "image/jpeg" });
+  } catch {
+    toast("Couldn't build the image");
+    return;
+  }
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file] }).catch((e) => {
+      // AbortError is the user closing the sheet, which is not a failure
+      if (e && e.name !== "AbortError") toast("Sharing was refused");
+    });
+    return;
+  }
+  // desktop, or a browser without file sharing: save it instead
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast("Saved the image");
+}
+
 function loadSync() {
   try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; }
   catch { return {}; }
@@ -708,12 +836,33 @@ function stampCard(c, visitCounts) {
     <div class="stamp-actions">
       <button class="mini-btn" data-act="edit" title="Edit">✎</button>
     </div>`;
+  // The share control sits ON the photo rather than in the action tray, which
+  // is hover/tap-to-reveal — that would make sharing two taps. It only exists
+  // when there is a photo, so the photo is the natural place for it.
+  //
+  // It appears only once the photo has actually DECODED, because it composes
+  // from this very <img>: an img that has not loaded has naturalWidth 0, which
+  // would draw a blank card rather than fail.
   if (c.photo) photoGet(c.photo).then((d) => {
     if (!d) return;
+    const wrap = document.createElement("div");
+    wrap.className = "stamp-photowrap";
     const img = document.createElement("img");
     img.className = "stamp-photo";
-    img.src = d; img.alt = "";
-    card.appendChild(img);
+    img.alt = "";
+    const share = document.createElement("button");
+    share.className = "share-btn hidden";
+    share.type = "button";
+    share.title = "Share as an image";
+    share.textContent = "Share";
+    img.addEventListener("load", () => share.classList.remove("hidden"));
+    share.addEventListener("click", (e) => {
+      e.stopPropagation();            // the card itself toggles its actions
+      shareCard(c, img);
+    });
+    img.src = d;
+    wrap.appendChild(img); wrap.appendChild(share);
+    card.appendChild(wrap);
   });
   card.querySelector('[data-act="edit"]').addEventListener("click", (e) => {
     e.stopPropagation();
