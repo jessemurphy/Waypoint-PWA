@@ -14,6 +14,14 @@ locally on your device, no accounts, no tracking, no server.
 - **Stats**: total stamps, unique places, current day-streak
 - **"Your regulars"**: your most-visited places, Swarm-mayor style
 - **Edit/delete** any stamp (fix a name, adjust the time)
+- **Who was there**: tag familynet accounts by tapping a chip, and name anyone
+  else as free text. The two are different things on the intranet — a tagged
+  account is notified and the visit shows on their person page; a free-text
+  name is recorded on the visit and nothing more. The chip list is fetched from
+  familynet and cached, so it works offline. It replaced a single
+  comma-separated field, where one misspelled username (`Mike`, when the
+  account is `michael`) made the server refuse the whole stamp, note and photo
+  included, and the stamp then retried silently for days.
 - **Export/import JSON** — the format is deliberately simple (`ts`, `name`, `lat`, `lon`,
   `category`) so it can merge into a bigger location archive easily
 

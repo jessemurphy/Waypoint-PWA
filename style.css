@@ -554,3 +554,32 @@ input,select{font-family:inherit;}
   padding:10px 16px;border-radius:999px;border:none;cursor:pointer;
   background:var(--brass, #C9A227);color:#141414;font-weight:700;z-index:60;
   box-shadow:0 4px 14px rgba(0,0,0,.35);}
+
+/* ---------- Companion chips ---------- */
+/* A tap target, so sized for a finger rather than for density: 40px tall
+   clears the ~44px guidance once the 8px row gap is counted, and the family
+   is small enough that the whole list fits without scrolling. */
+.chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.chip{
+  background:none;
+  border:1px solid var(--line-strong);
+  color:var(--ink-dim);
+  font-family:var(--body);
+  font-size:14px;
+  border-radius:999px;
+  padding:10px 15px;
+  min-height:40px;
+  cursor:pointer;
+}
+/* Selected reads as filled, not merely tinted — on a phone in daylight a
+   border-colour change alone is not a reliable signal of state. */
+.chip.on{
+  background:var(--teal);
+  border-color:var(--teal);
+  color:var(--bg);
+  font-weight:600;
+}

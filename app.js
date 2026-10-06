@@ -467,9 +467,9 @@ function drawCard(img, c) {
   lines.push({ font: F.meta, fill: "#6E7F76", after: 42,
     text: new Date(c.ts).toLocaleDateString(undefined,
       { weekday: "long", month: "long", day: "numeric", year: "numeric" }) });
-  if (c.with && c.with.length)
-    lines.push({ font: F.meta, fill: "#BCC7BB", after: 42,
-                 text: "with " + c.with.join(", ") });
+  const companions = withLine(c);
+  if (companions)
+    lines.push({ font: F.meta, fill: "#BCC7BB", after: 42, text: "with " + companions });
   if (c.note) {
     cx.font = F.note;
     const nl = _wrap(cx, c.note, W, 3);
@@ -561,6 +561,88 @@ function saveSyncSettings(url, token, person) {
   }
 }
 
+// ---------------------------------------------------------------- people ---
+//
+// The accounts the server will accept in `with`. Cached in localStorage because
+// the edit sheet has to render chips while offline -- which is most of the time
+// on a trip -- and refreshed on each app start, cheaply (one small GET).
+//
+// WHY CHIPS AT ALL: `with` is a foreign key wearing the costume of a text
+// field. The server refuses an unmatched name, deliberately, so that a typo
+// never silently means nobody was told they were there -- but the refusal takes
+// the stamp's note and photo down with it, and the only signal is a toast. A
+// real note was lost that way: "Mike" was typed, the account is `michael`, and
+// the stamp retried and failed for four days. You cannot mistype a tap.
+const PEOPLE_KEY = "waypoint-people-v1";
+
+function loadPeople() {
+  try { return JSON.parse(localStorage.getItem(PEOPLE_KEY)) || []; }
+  catch (e) { return []; }
+}
+
+async function refreshPeople() {
+  const { url, token } = loadSync();
+  if (!url || !token) return;
+  try {
+    const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/people",
+                            { headers: { "X-Api-Key": token } });
+    if (!res.ok) return;                       // keep whatever is cached
+    const body = await res.json();
+    if (Array.isArray(body.people) && body.people.length)
+      localStorage.setItem(PEOPLE_KEY, JSON.stringify(body.people));
+  } catch (e) { /* offline -- the cache is the point */ }
+}
+
+// The chips for one stamp. Selection lives in the DOM (a .on class) rather
+// than in a variable, so re-opening the sheet cannot disagree with what is
+// drawn. Falls back to the old free-text input when the roster has never been
+// fetched: on a first run with no signal, typing a name is better than having
+// no way to tag anyone at all.
+function renderWhoChips(selected) {
+  const box = document.getElementById("edit-who");
+  const fallback = document.getElementById("edit-with");
+  const people = loadPeople();
+  box.innerHTML = "";
+  if (!people.length) {
+    box.classList.add("hidden");
+    fallback.classList.remove("hidden");
+    fallback.value = (selected || []).join(", ");
+    return;
+  }
+  fallback.classList.add("hidden");
+  box.classList.remove("hidden");
+  // Anyone already on the stamp but no longer in the roster still gets a chip,
+  // so editing a stamp cannot quietly drop a tag it already carried.
+  const names = people.slice();
+  for (const n of selected || []) if (!names.includes(n)) names.push(n);
+  for (const n of names) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + ((selected || []).includes(n) ? " on" : "");
+    b.textContent = n;
+    b.addEventListener("click", () => b.classList.toggle("on"));
+    box.appendChild(b);
+  }
+}
+
+// Tagged accounts and free-text guests read as ONE list to a human -- "with
+// Mick and michael" -- even though they are stored and mean different things.
+// Kept to one line so the share card has no extra line to measure.
+function withLine(c) {
+  const parts = (c.with || []).slice();
+  if (c.guests) parts.push(c.guests);
+  return parts.join(", ");
+}
+
+function pickedWho() {
+  const box = document.getElementById("edit-who");
+  if (!box.classList.contains("hidden"))
+    return Array.from(box.querySelectorAll(".chip.on")).map((b) => b.textContent);
+  return document.getElementById("edit-with").value
+    .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 20);
+}
+
+
 async function syncCheckin(c) {
   const { url, token, person } = loadSync();
   if (!url || !token || c.synced) return;
@@ -570,7 +652,7 @@ async function syncCheckin(c) {
       headers: { "Content-Type": "application/json", "X-Api-Key": token },
       body: JSON.stringify({ name: c.name, lat: c.lat, lon: c.lon, category: c.category, ts: c.ts,
                              note: c.note || "", person: person || "", with: c.with || [],
-                             client_id: c.id }),
+                             who_extra: c.guests || "", client_id: c.id }),
     });
     if (res.ok) {
       c.synced = true; save();
@@ -669,7 +751,8 @@ function openEdit(id) {
   document.getElementById("edit-time").value =
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   document.getElementById("edit-note").value = c.note || "";
-  document.getElementById("edit-with").value = (c.with || []).join(", ");
+  renderWhoChips(c.with || []);
+  document.getElementById("edit-guests").value = c.guests || "";
   editPhoto = null; editPhotoBase = null; editPhotoTurns = 0; editPhotoIsNew = false;
   const thumb = document.getElementById("edit-photo-thumb");
   const btn = document.getElementById("edit-photo-btn");
@@ -703,16 +786,19 @@ function saveEdit() {
   const note = document.getElementById("edit-note").value.trim();
   const noteChanged = (c.note || "") !== note;
   if (note) c.note = note; else delete c.note;
-  const withList = document.getElementById("edit-with").value
-    .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 20);
+  const withList = pickedWho().slice(0, 20);
   const withChanged = JSON.stringify(withList) !== JSON.stringify(c.with || []);
   if (withList.length) c.with = withList; else delete c.with;
+  const guests = document.getElementById("edit-guests").value.trim().slice(0, 200);
+  const guestsChanged = (c.guests || "") !== guests;
+  if (guests) c.guests = guests; else delete c.guests;
   // Any save of a stamp that carries a note re-queues it — not just when
   // the note text changed. That heals notes typed before the server could
   // accept them: once the intranet updates, re-saving the stamp delivers
   // the note. Safe because the server dedupes the visit by client_id and
   // the note-comment by identical body.
-  if (note || noteChanged || withList.length || withChanged) c.synced = false;
+  if (note || noteChanged || withList.length || withChanged
+      || guests || guestsChanged) c.synced = false;
   if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; delete c.photoSynced; }
   else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); c.photoSynced = false; }
   save();
@@ -831,7 +917,7 @@ function stampCard(c, visitCounts) {
       <div class="stamp-coords">${fmtCoords(c.lat, c.lon)}</div>
       ${c.category ? `<div class="stamp-cat">${escapeHtml(c.category)}</div>` : ""}
     </div>
-    ${c.with && c.with.length ? `<div class="stamp-note">with ${escapeHtml(c.with.join(", "))}</div>` : ""}
+    ${withLine(c) ? `<div class="stamp-note">with ${escapeHtml(withLine(c))}</div>` : ""}
     ${c.note ? `<div class="stamp-note">${escapeHtml(c.note)}</div>` : ""}
     <div class="stamp-actions">
       <button class="mini-btn" data-act="edit" title="Edit">✎</button>
@@ -1057,7 +1143,7 @@ function init() {
                      document.getElementById("sync-person").value);
     renderSyncStatus();
     toast("Sync settings saved");
-    flushPendingSync();
+    refreshPeople().then(flushPendingSync);
   });
 
   if ("serviceWorker" in navigator) {
@@ -1066,7 +1152,9 @@ function init() {
 
   // photos live in IndexedDB — wait for it so the first render shows them
   pdbReady.then(render);
-  flushPendingSync();
+  // Before the flush, so a stamp that syncs on start is not racing a roster
+  // the sheet is about to need; it is one small GET and failure is a no-op.
+  refreshPeople().then(flushPendingSync);
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -92,9 +92,23 @@
       <textarea id="edit-note" rows="2" placeholder="who you were with, what it was like…"></textarea>
     </div>
     <div class="field">
-      <label>With <span style="opacity:.55;text-transform:none">(familynet usernames, comma-separated)</span></label>
-      <input type="text" id="edit-with" placeholder="ryan, noah" autocomplete="off"
-             autocapitalize="off" spellcheck="false">
+      <label>Who was there <span style="opacity:.55;text-transform:none">(tap to tag)</span></label>
+      <!-- Chips, not a text field. "with" is a foreign key on the server: an
+           unmatched name is refused, and that refusal used to block the
+           stamp's note and photo along with it. You cannot mistype a tap.
+           Falls back to the old comma-separated input when the account list
+           has never been fetched (first run, or offline before a sync). -->
+      <div id="edit-who" class="chips"></div>
+      <input type="text" id="edit-with" class="hidden" placeholder="ryan, noah"
+             autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label>Anyone else <span style="opacity:.55;text-transform:none">(no familynet account)</span></label>
+      <!-- Recorded as free text on the visit and shown beside the tagged
+           names. A tag is a claim about an account -- it notifies them and
+           appears on their person page; this is just a name. -->
+      <input type="text" id="edit-guests" maxlength="200"
+             placeholder="Mick, a friend from work" autocomplete="off">
     </div>
     <div class="field">
       <label>Photo <span style="opacity:.55;text-transform:none">(optional)</span></label>
@@ -146,7 +160,7 @@
     </div>
     <p class="sheet-note" id="sync-status" style="margin-top:0;">Not connected</p>
     <button class="btn-secondary" id="sync-save" style="width:100%;">Save sync settings</button>
-    <p class="sheet-note" style="opacity:.55;">Waypoint v12</p>
+    <p class="sheet-note" style="opacity:.55;">Waypoint v13</p>
 
     <button class="sheet-cancel" id="menu-close">Close</button>
   </div>
