@@ -130,10 +130,34 @@ function parseOverpass(data, lat, lon, max) {
 // this phone rate-limited. ~110m grid key (3 decimals).
 const nearbyCache = new Map();
 
+// Ask familynet's Overpass proxy first when sync is configured: from a
+// phone on cell data the path to the (European) public Overpass servers
+// stalls and resets — field-verified in Biloxi, where the pi answered
+// instantly on the same LTE while both Overpass hosts failed and
+// /api/status showed free slots. The pi has the good route and a shared
+// 10-minute cache. Returns null (never throws) so callers fall back to
+// asking Overpass directly.
+async function fetchViaPi(params) {
+  const { url, token } = loadSync();
+  if (!url || !token) return null;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/osm_nearby?" + params,
+                            { headers: { "X-Api-Key": token }, signal: ctl.signal });
+    if (!res.ok) return null;          // 404 = pi not updated yet; 502 = its Overpass call failed
+    const body = await res.json();
+    return Array.isArray(body.places) ? body.places : null;
+  } catch { return null; }
+  finally { clearTimeout(t); }
+}
+
 async function fetchNearbyPlaces(lat, lon) {
   const cacheKey = lat.toFixed(3) + "," + lon.toFixed(3);
   const hit = nearbyCache.get(cacheKey);
   if (hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.places;
+  const viaPi = await fetchViaPi(`lat=${lat}&lon=${lon}`);
+  if (viaPi) { nearbyCache.set(cacheKey, { ts: Date.now(), places: viaPi }); return viaPi; }
   // 320m rather than 220: indoors a phone's GPS can drift 100m+, and a
   // big store's mapped point is its building centroid, which can sit well
   // away from where you're standing inside it.
@@ -158,6 +182,8 @@ async function fetchNearbyPlaces(lat, lon) {
 // metacharacters in what was typed are escaped, and Overpass's own quoting
 // needs backslashes and quotes doubled.
 async function searchPlacesByName(lat, lon, text) {
+  const viaPi = await fetchViaPi(`lat=${lat}&lon=${lon}&q=${encodeURIComponent(text)}`);
+  if (viaPi) return viaPi;
   const rx = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
                  .replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const query = `[out:json][timeout:12];\nnwr(around:4000,${lat},${lon})["name"~"${rx}",i];\nout center 40;`;
