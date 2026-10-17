@@ -924,6 +924,8 @@ function saveEdit() {
   const timeVal = document.getElementById("edit-time").value;
   if (!name) { toast("Give it a name"); return; }
   if (!timeVal) { toast("Pick a time"); return; }
+  const nameChanged = c.name !== name;   // a rename must re-send — the server
+                                         // can now fix the spot's own name from it
   c.name = name;
   c.ts = new Date(timeVal).toISOString();
   const note = document.getElementById("edit-note").value.trim();
@@ -941,7 +943,7 @@ function saveEdit() {
   // the note. Safe because the server dedupes the visit by client_id and
   // the note-comment by identical body.
   if (note || noteChanged || withList.length || withChanged
-      || guests || guestsChanged) c.synced = false;
+      || guests || guestsChanged || nameChanged) c.synced = false;
   if (editPhoto === "remove"){ photoDel(c.photo); delete c.photo; delete c.photoSynced; }
   else if (editPhoto){ c.photo = c.id; photoPut(c.id, editPhoto); c.photoSynced = false; }
   save();
