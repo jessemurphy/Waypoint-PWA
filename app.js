@@ -33,6 +33,11 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+function fmtDist(m) {
+  // wider-search hits can be a couple of miles out — meters stop reading
+  return m < 1000 ? Math.round(m) + "m" : (m / 1609.34).toFixed(1) + "mi";
+}
+
 function fmtCoords(lat, lon) {
   return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 }
@@ -49,34 +54,40 @@ function getPosition() {
 }
 
 /* ---------- nearby places via Overpass (OpenStreetMap) ---------- */
-async function fetchNearbyPlaces(lat, lon) {
-  // 320m rather than 220: indoors a phone's GPS can drift 100m+, and a
-  // big store's mapped point is its building centroid, which can sit well
-  // away from where you're standing inside it.
-  const radius = 320; // meters
-  // nwr = node + way + relation in one clause. Large stores are often
-  // mapped as building ways or multipolygon relations — the old
-  // node/way-only query missed relations entirely.
-  const query = `
-[out:json][timeout:10];
-(
-  nwr(around:${radius},${lat},${lon})["name"]["amenity"];
-  nwr(around:${radius},${lat},${lon})["name"]["shop"];
-  nwr(around:${radius},${lat},${lon})["name"]["leisure"];
-  nwr(around:${radius},${lat},${lon})["name"]["tourism"];
-);
-out center 80;`;
-  // "out center 80" not 25: Overpass truncates BEFORE we can sort by
-  // distance, and it lists nodes ahead of ways — so in a dense shopping
-  // strip, 25 small named nodes could crowd out the very building you're
-  // standing in. Distance sorting below still trims the list to 12.
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: "data=" + encodeURIComponent(query),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  });
-  if (!res.ok) throw new Error("Overpass " + res.status);
-  const data = await res.json();
+// Every OSM tag family a named check-in-able place can carry. The original
+// four (amenity/shop/leisure/tourism) missed offices, clinics, stations,
+// monuments, piers — a real chunk of "the database is limited" was just
+// never asking for them.
+const OSM_KEYS = ["amenity", "shop", "leisure", "tourism", "office",
+                  "healthcare", "craft", "historic", "railway", "aeroway",
+                  "man_made"];
+
+// Overpass with a hard deadline and a mirror: the main instance is often
+// just overloaded, which reads as "no results" to a user. Each host gets
+// 10s, aborted for real (not just Overpass's own [timeout:]).
+async function fetchOverpass(query) {
+  const hosts = ["https://overpass-api.de/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter"];
+  let lastErr;
+  for (const host of hosts) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 10000);
+    try {
+      const res = await fetch(host, {
+        method: "POST",
+        body: "data=" + encodeURIComponent(query),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        signal: ctl.signal,
+      });
+      if (!res.ok) throw new Error("Overpass " + res.status);
+      return await res.json();
+    } catch (e) { lastErr = e; }
+    finally { clearTimeout(t); }
+  }
+  throw lastErr;
+}
+
+function parseOverpass(data, lat, lon, max) {
   const places = [];
   for (const el of data.elements || []) {
     const name = el.tags && el.tags.name;
@@ -84,9 +95,10 @@ out center 80;`;
     const plat = el.lat ?? (el.center && el.center.lat);
     const plon = el.lon ?? (el.center && el.center.lon);
     if (plat == null) continue;
-    const category =
-      (el.tags.amenity || el.tags.shop || el.tags.leisure || el.tags.tourism || "place")
-        .replace(/_/g, " ");
+    let category = "place";
+    for (const k of OSM_KEYS) {
+      if (el.tags[k] && el.tags[k] !== "yes") { category = el.tags[k].replace(/_/g, " "); break; }
+    }
     places.push({
       name,
       category,
@@ -106,7 +118,34 @@ out center 80;`;
     seen.add(p.name);
     unique.push(p);
   }
-  return unique.slice(0, 12);
+  return unique.slice(0, max);
+}
+
+async function fetchNearbyPlaces(lat, lon) {
+  // 320m rather than 220: indoors a phone's GPS can drift 100m+, and a
+  // big store's mapped point is its building centroid, which can sit well
+  // away from where you're standing inside it.
+  const radius = 320; // meters
+  // nwr = node + way + relation in one clause; large stores are often
+  // building ways or multipolygon relations. "out center 80" not 25:
+  // Overpass truncates BEFORE we can sort by distance, and it lists nodes
+  // ahead of ways — in a dense strip, small named nodes could crowd out
+  // the very building you're standing in.
+  const clauses = OSM_KEYS
+    .map((k) => `  nwr(around:${radius},${lat},${lon})["name"]["${k}"];`).join("\n");
+  const query = `[out:json][timeout:10];\n(\n${clauses}\n);\nout center 80;`;
+  return parseOverpass(await fetchOverpass(query), lat, lon, 12);
+}
+
+// The "it exists but its pin is outside the 320m circle" escape hatch:
+// search OSM BY NAME out to 4km. Case-insensitive substring; regex
+// metacharacters in what was typed are escaped, and Overpass's own quoting
+// needs backslashes and quotes doubled.
+async function searchPlacesByName(lat, lon, text) {
+  const rx = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+                 .replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const query = `[out:json][timeout:10];\nnwr(around:4000,${lat},${lon})["name"~"${rx}",i];\nout center 40;`;
+  return parseOverpass(await fetchOverpass(query), lat, lon, 12);
 }
 
 /* ---------- personal places (reusable custom entries) ---------- */
@@ -274,31 +313,71 @@ async function startCheckin() {
   openPicker(loc);
 }
 
+function lookupBusy(msg) {
+  // an ANIMATED wait line, so a slow Overpass answer doesn't look like a
+  // finished (empty) one — plus the 10s abort in fetchOverpass guarantees
+  // this state always ends in results, the empty state, or Retry.
+  document.getElementById("place-options").innerHTML =
+    `<div class="sheet-sub">${escapeHtml(msg)}<span class="lookup-dots"></span></div>`;
+}
+
+function lookupFailed(loc, msg) {
+  const optionsEl = document.getElementById("place-options");
+  optionsEl.innerHTML = `<div class="sheet-sub">${escapeHtml(msg)}</div>`;
+  const retry = document.createElement("button");
+  retry.className = "place-option";
+  retry.innerHTML = `<div class="place-opt-main"><div class="place-opt-name">↻ Retry lookup</div></div>`;
+  retry.addEventListener("click", () => runNearbyLookup(loc));
+  optionsEl.appendChild(retry);
+}
+
+function runNearbyLookup(loc) {
+  lookupBusy("Looking up nearby places");
+  fetchNearbyPlaces(loc.lat, loc.lon)
+    .then((places) => renderPlaceOptions(places, loc))
+    .catch(() => lookupFailed(loc,
+      "Couldn't reach the place directory — retry, or name it yourself below."));
+}
+
+function runWiderSearch(loc) {
+  const text = document.getElementById("custom-name").value.trim();
+  if (text.length < 2) return;
+  lookupBusy(`Searching OSM for “${text}” within 2.5 miles`);
+  searchPlacesByName(loc.lat, loc.lon, text)
+    .then((places) => {
+      if (places.length === 0) {
+        lookupFailed(loc, `Nothing named like “${text}” within 2.5 miles — stamp it yourself below.`);
+      } else renderPlaceOptions(places, loc);
+    })
+    .catch(() => lookupFailed(loc, "Couldn't reach the place directory — retry, or name it yourself below."));
+}
+
+function updateWiderBtn() {
+  const btn = document.getElementById("search-wider");
+  const text = document.getElementById("custom-name").value.trim();
+  btn.classList.toggle("hidden", text.length < 2 || !pendingLocation);
+  if (text.length >= 2) btn.textContent = `\ud83d\udd0d Search OSM for “${text}”`;
+}
+
 function openPicker(loc) {
   document.getElementById("picker-coords").textContent =
     fmtCoords(loc.lat, loc.lon) + `  ·  ±${Math.round(loc.accuracy)}m`;
-  const optionsEl = document.getElementById("place-options");
-  optionsEl.innerHTML = `<div class="sheet-sub">Looking up nearby places…</div>`;
   document.getElementById("custom-name").value = "";
+  document.getElementById("search-wider").classList.add("hidden");
   document.getElementById("picker-overlay").classList.remove("hidden");
   document.getElementById("lounge-callout").innerHTML = "";
   document.getElementById("family-options").innerHTML = "";
   renderPersonalOptions(loc, "");
 
   fetchNearbyFamily(loc.lat, loc.lon).then((data) => renderFamilyOptions(data, loc));
-
-  fetchNearbyPlaces(loc.lat, loc.lon)
-    .then((places) => renderPlaceOptions(places, loc))
-    .catch(() => {
-      optionsEl.innerHTML = `<div class="sheet-sub">Couldn't reach the place directory — name it yourself below.</div>`;
-    });
+  runNearbyLookup(loc);
 }
 
 function renderPlaceOptions(places, loc) {
   const optionsEl = document.getElementById("place-options");
   optionsEl.innerHTML = "";
   if (places.length === 0) {
-    optionsEl.innerHTML = `<div class="sheet-sub">Nothing named nearby in OpenStreetMap — name it yourself below.</div>`;
+    optionsEl.innerHTML = `<div class="sheet-sub">Nothing named nearby in OpenStreetMap — type a name below to search wider, or stamp it yourself.</div>`;
     return;
   }
   // How many times you've been to each (match by name) — shown as a little badge
@@ -314,7 +393,7 @@ function renderPlaceOptions(places, loc) {
         <div class="place-opt-name">${escapeHtml(p.name)}${visits > 0 ? `<span class="visit-badge">×${visits}</span>` : ""}</div>
         <div class="place-opt-detail">${escapeHtml(p.category)}</div>
       </div>
-      <div class="place-opt-dist">${doneToday ? "✓ today" : Math.round(p.dist) + "m"}</div>`;
+      <div class="place-opt-dist">${doneToday ? "✓ today" : fmtDist(p.dist)}</div>`;
     if (!doneToday) {
       btn.addEventListener("click", () => {
         commitCheckin({ name: p.name, category: p.category, lat: loc.lat, lon: loc.lon, osmId: p.osmId });
@@ -1080,6 +1159,10 @@ function init() {
   });
   document.getElementById("custom-name").addEventListener("input", (e) => {
     if (pendingLocation) renderPersonalOptions(pendingLocation, e.target.value);
+    updateWiderBtn();
+  });
+  document.getElementById("search-wider").addEventListener("click", () => {
+    if (pendingLocation) runWiderSearch(pendingLocation);
   });
 
   document.getElementById("edit-cancel").addEventListener("click", closeEdit);

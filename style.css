@@ -583,3 +583,32 @@ input,select{font-family:inherit;}
   color:var(--bg);
   font-weight:600;
 }
+
+/* lookup liveness: animated ellipsis while Overpass is being asked */
+.lookup-dots::after{
+  content:"";
+  display:inline-block;
+  width:1.4em;
+  text-align:left;
+  animation:lookupdots 1.2s steps(4,end) infinite;
+}
+@keyframes lookupdots{
+  0%{content:"";}
+  25%{content:".";}
+  50%{content:"..";}
+  75%{content:"...";}
+}
+
+/* "search OSM wider by name" — appears once something is typed */
+#search-wider{
+  display:block;
+  width:100%;
+  margin-top:8px;
+  padding:11px;
+  border-radius:var(--radius);
+  background:none;
+  border:1px dashed var(--line-strong);
+  color:var(--teal);
+  font-size:14px;
+}
+#search-wider.hidden{display:none;}
