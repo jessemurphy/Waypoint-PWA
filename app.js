@@ -331,25 +331,34 @@ function lookupFailed(loc, msg) {
   optionsEl.appendChild(retry);
 }
 
+// Only the NEWEST lookup may touch the results list. Without this, a slow
+// nearby query still in flight when you start a wider search lands later
+// and overwrites the wider results — seen live: the Toasted Yolk appeared,
+// then the stale nearby query's failure replaced it with "can't connect".
+let lookupSeq = 0;
+
 function runNearbyLookup(loc) {
+  const seq = ++lookupSeq;
   lookupBusy("Looking up nearby places");
   fetchNearbyPlaces(loc.lat, loc.lon)
-    .then((places) => renderPlaceOptions(places, loc))
-    .catch(() => lookupFailed(loc,
-      "Couldn't reach the place directory — retry, or name it yourself below."));
+    .then((places) => { if (seq === lookupSeq) renderPlaceOptions(places, loc); })
+    .catch(() => { if (seq === lookupSeq) lookupFailed(loc,
+      "Couldn't reach the place directory — retry, or name it yourself below."); });
 }
 
 function runWiderSearch(loc) {
   const text = document.getElementById("custom-name").value.trim();
   if (text.length < 2) return;
+  const seq = ++lookupSeq;
   lookupBusy(`Searching OSM for “${text}” within 2.5 miles`);
   searchPlacesByName(loc.lat, loc.lon, text)
     .then((places) => {
+      if (seq !== lookupSeq) return;
       if (places.length === 0) {
         lookupFailed(loc, `Nothing named like “${text}” within 2.5 miles — stamp it yourself below.`);
       } else renderPlaceOptions(places, loc);
     })
-    .catch(() => lookupFailed(loc, "Couldn't reach the place directory — retry, or name it yourself below."));
+    .catch(() => { if (seq === lookupSeq) lookupFailed(loc, "Couldn't reach the place directory — retry, or name it yourself below."); });
 }
 
 function updateWiderBtn() {
