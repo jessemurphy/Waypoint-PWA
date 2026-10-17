@@ -370,7 +370,7 @@ function runWiderSearch(loc) {
         lookupFailed(loc, `Nothing named like “${text}” within 2.5 miles — stamp it yourself below.`);
       } else renderPlaceOptions(places, loc);
     })
-    .catch(() => { if (seq === lookupSeq) lookupFailed(loc, "Couldn't reach the place directory — retry, or name it yourself below."); });
+    .catch((e) => { if (seq === lookupSeq) lookupFailed(loc, `Place lookup failed (${lookupErrText(e)}) \u2014 retry, or name it yourself below.`); });
 }
 
 function updateWiderBtn() {
