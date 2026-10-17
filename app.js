@@ -71,7 +71,10 @@ async function fetchOverpass(query) {
   let lastErr;
   for (const host of hosts) {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 10000);
+    // 16s: the query's own [timeout:12] server budget plus network headroom.
+    // A client deadline EQUAL to the server's (10/10 in v14) aborted busy
+    // but succeeding queries right at the finish line.
+    const t = setTimeout(() => ctl.abort(), 16000);
     try {
       const res = await fetch(host, {
         method: "POST",
@@ -131,9 +134,11 @@ async function fetchNearbyPlaces(lat, lon) {
   // Overpass truncates BEFORE we can sort by distance, and it lists nodes
   // ahead of ways — in a dense strip, small named nodes could crowd out
   // the very building you're standing in.
-  const clauses = OSM_KEYS
-    .map((k) => `  nwr(around:${radius},${lat},${lon})["name"]["${k}"];`).join("\n");
-  const query = `[out:json][timeout:10];\n(\n${clauses}\n);\nout center 80;`;
+  // ONE clause, not one per tag family: [~"^(k1|k2|…)$"~"."] matches any
+  // element carrying any of the keys in a single radius scan — 11 separate
+  // around-scans cost Overpass real work and invite its rate limiter.
+  const keyRx = OSM_KEYS.join("|");
+  const query = `[out:json][timeout:12];\nnwr(around:${radius},${lat},${lon})["name"][~"^(${keyRx})$"~"."];\nout center 80;`;
   return parseOverpass(await fetchOverpass(query), lat, lon, 12);
 }
 
@@ -144,7 +149,7 @@ async function fetchNearbyPlaces(lat, lon) {
 async function searchPlacesByName(lat, lon, text) {
   const rx = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
                  .replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const query = `[out:json][timeout:10];\nnwr(around:4000,${lat},${lon})["name"~"${rx}",i];\nout center 40;`;
+  const query = `[out:json][timeout:12];\nnwr(around:4000,${lat},${lon})["name"~"${rx}",i];\nout center 40;`;
   return parseOverpass(await fetchOverpass(query), lat, lon, 12);
 }
 
@@ -337,13 +342,20 @@ function lookupFailed(loc, msg) {
 // then the stale nearby query's failure replaced it with "can't connect".
 let lookupSeq = 0;
 
+function lookupErrText(e) {
+  if (e && e.name === "AbortError") return "timed out";
+  const m = /Overpass (\d+)/.exec(e && e.message || "");
+  if (m) return m[1] === "429" ? "server busy \u2014 wait a minute" : "HTTP " + m[1];
+  return "no connection";
+}
+
 function runNearbyLookup(loc) {
   const seq = ++lookupSeq;
   lookupBusy("Looking up nearby places");
   fetchNearbyPlaces(loc.lat, loc.lon)
     .then((places) => { if (seq === lookupSeq) renderPlaceOptions(places, loc); })
-    .catch(() => { if (seq === lookupSeq) lookupFailed(loc,
-      "Couldn't reach the place directory — retry, or name it yourself below."); });
+    .catch((e) => { if (seq === lookupSeq) lookupFailed(loc,
+      `Place lookup failed (${lookupErrText(e)}) \u2014 retry, or name it yourself below.`); });
 }
 
 function runWiderSearch(loc) {
