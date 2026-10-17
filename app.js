@@ -67,7 +67,8 @@ const OSM_KEYS = ["amenity", "shop", "leisure", "tourism", "office",
 // 10s, aborted for real (not just Overpass's own [timeout:]).
 async function fetchOverpass(query) {
   const hosts = ["https://overpass-api.de/api/interpreter",
-                 "https://overpass.kumi.systems/api/interpreter"];
+                 "https://overpass.kumi.systems/api/interpreter",
+                 "https://overpass.private.coffee/api/interpreter"];
   let lastErr;
   for (const host of hosts) {
     const ctl = new AbortController();
@@ -124,7 +125,15 @@ function parseOverpass(data, lat, lon, max) {
   return unique.slice(0, max);
 }
 
+// Same spot, same answer for 5 minutes: every picker open used to fire a
+// fresh Overpass query, and a burst of opens/retries is exactly what got
+// this phone rate-limited. ~110m grid key (3 decimals).
+const nearbyCache = new Map();
+
 async function fetchNearbyPlaces(lat, lon) {
+  const cacheKey = lat.toFixed(3) + "," + lon.toFixed(3);
+  const hit = nearbyCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.places;
   // 320m rather than 220: indoors a phone's GPS can drift 100m+, and a
   // big store's mapped point is its building centroid, which can sit well
   // away from where you're standing inside it.
@@ -139,7 +148,9 @@ async function fetchNearbyPlaces(lat, lon) {
   // around-scans cost Overpass real work and invite its rate limiter.
   const keyRx = OSM_KEYS.join("|");
   const query = `[out:json][timeout:12];\nnwr(around:${radius},${lat},${lon})["name"][~"^(${keyRx})$"~"."];\nout center 80;`;
-  return parseOverpass(await fetchOverpass(query), lat, lon, 12);
+  const places = parseOverpass(await fetchOverpass(query), lat, lon, 12);
+  nearbyCache.set(cacheKey, { ts: Date.now(), places });
+  return places;
 }
 
 // The "it exists but its pin is outside the 320m circle" escape hatch:
@@ -150,7 +161,9 @@ async function searchPlacesByName(lat, lon, text) {
   const rx = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
                  .replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const query = `[out:json][timeout:12];\nnwr(around:4000,${lat},${lon})["name"~"${rx}",i];\nout center 40;`;
-  return parseOverpass(await fetchOverpass(query), lat, lon, 12);
+  const places = parseOverpass(await fetchOverpass(query), lat, lon, 12);
+  nearbyCache.set(cacheKey, { ts: Date.now(), places });
+  return places;
 }
 
 /* ---------- personal places (reusable custom entries) ---------- */
@@ -346,7 +359,11 @@ function lookupErrText(e) {
   if (e && e.name === "AbortError") return "timed out";
   const m = /Overpass (\d+)/.exec(e && e.message || "");
   if (m) return m[1] === "429" ? "server busy \u2014 wait a minute" : "HTTP " + m[1];
-  return "no connection";
+  // fetch itself rejected: genuinely offline, or OSM rate-limited this
+  // phone (its refusals carry no CORS headers, so the browser reports
+  // them as plain network failures — seen live after a burst of tests)
+  return navigator.onLine === false ? "offline"
+       : "OSM is refusing this phone \u2014 likely rate-limited, wait a couple of minutes";
 }
 
 function runNearbyLookup(loc) {
