@@ -141,7 +141,13 @@ async function fetchViaPi(params) {
   const { url, token } = loadSync();
   if (!url || !token) return null;
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 12000);
+  // 14s: must outlast the pi's own 11s Overpass budget (familynet
+  // _OVERPASS_BUDGET), or the phone gives up and falls back to asking
+  // Overpass directly over cell data -- the exact path this proxy exists
+  // to avoid. Used to be 12s against the pi's old (per-host) 15s/host
+  // budget, which could legitimately run to 30s; that's how a Nov 2026
+  // Atlanta lookup (Best BBQ, the Marriott Gateway) silently failed twice.
+  const t = setTimeout(() => ctl.abort(), 14000);
   try {
     const res = await fetch(url.replace(/\/+$/, "") + "/vacations/api/osm_nearby?" + params,
                             { headers: { "X-Api-Key": token }, signal: ctl.signal });
